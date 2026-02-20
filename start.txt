@@ -1,0 +1,26 @@
+빠른 시작 (Docker + gRPC)
+
+1) 컨테이너 실행
+- make up
+
+2) 상태 확인
+- make health
+- 또는: python client-grpc.py --endpoint 127.0.0.1:50051 --health --health-model asr
+
+3) gRPC 단건 추론 테스트
+- python client-grpc.py --endpoint 127.0.0.1:50051 --file files/reference.wav --lang ko --model-name asr --batch-size 1 --requests 1
+- 단건은 `Infer` 경로라 빠른 응답 확인용으로 사용
+
+4) gRPC 동시 요청 테스트(예: 160 동시, 총 960)
+- python client-grpc.py --endpoint 127.0.0.1:50051 --file files/reference.wav --lang ko --model-name asr --batch-size 160 --requests 960
+
+5) BatchInfer(repeated bytes) 1000 샘플 벤치마크
+- make benchmark-grpc-batch GRPC_BENCH_AUDIO_DIR=/data/8_Daejeon_sobang/Training/audio GRPC_BENCH_SAMPLES=1000 GRPC_BENCH_BATCH=16
+
+6) 설정 변경 반영
+- config/runtime.json 수정 후
+- docker restart qwen3-asr-fast
+
+참고
+- gRPC audio 필드는 파일 원본이 아니라 float32 PCM bytes(16kHz mono)여야 함
+- 상세 통신 문서: grpc_communication.md

@@ -1,0 +1,32 @@
+services:
+  asr-server:
+    container_name: qwen3-asr-fast
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: qwenllm/qwen3-asr:cu128
+    restart: unless-stopped
+    ipc: host
+    env_file:
+      - ../config/docker.env
+    environment:
+      APP_CONFIG_PATH: /data/shared/Qwen3-ASR/config/runtime.json
+      PYTHONPATH: /data/shared/Qwen3-ASR/src
+    ports:
+      - "8907:8000"
+      - "50051:50051"
+    volumes:
+      - ..:/data/shared/Qwen3-ASR
+      - ../config/runtime.json:/data/shared/Qwen3-ASR/config/runtime.json:ro
+      - ../logs:/data/shared/Qwen3-ASR/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: ["uvicorn", "fast_qwen_asr.api.http_server:app", "--host", "0.0.0.0", "--port", "8000"]

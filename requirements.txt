@@ -1,2 +1,10 @@
 websockets
 aiohttp
+grpcio
+protobuf
+numpy
+soundfile
+fastapi
+uvicorn
+python-multipart
+psutil

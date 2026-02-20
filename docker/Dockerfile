@@ -54,12 +54,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/pip \
     if [ "$BUNDLE_FLASH_ATTENTION" = "true" ]; then \
-        pip3 install -U flash-attn --no-build-isolation git+https://github.com/Dao-AILab/flash-attention.git; \
+        MAX_JOBS=1 pip3 install -U flash-attn --no-build-isolation git+https://github.com/Dao-AILab/flash-attention.git; \
     fi
 
 RUN rm -rf /root/.cache/pip
 
 EXPOSE 80
 
-# server.py will be mounted at runtime
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+ENV APP_CONFIG_PATH=/data/shared/Qwen3-ASR/config/runtime.json
+ENV PYTHONPATH=/data/shared/Qwen3-ASR/src
+CMD ["uvicorn", "fast_qwen_asr.api.http_server:app", "--host", "0.0.0.0", "--port", "8000"]

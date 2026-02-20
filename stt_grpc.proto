@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package stt;
+
+service STTService {
+  rpc Infer (InferRequest) returns (InferResponse);
+  rpc BatchInfer (BatchInferRequest) returns (BatchInferResponse);
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message InferRequest {
+  bytes audio = 1;
+  string lang = 2;
+  string pretext = 3;
+  string model_name = 4;
+}
+
+message InferResponse {
+  string text = 1;
+  bool success = 2;
+  string error = 3;
+}
+
+message BatchInferRequest {
+  repeated bytes audios = 1;
+  repeated string langs = 2;
+  string model_name = 3;
+}
+
+message BatchInferItem {
+  string text = 1;
+  bool success = 2;
+  string error = 3;
+}
+
+message BatchInferResponse {
+  repeated BatchInferItem items = 1;
+}
+
+message HealthCheckRequest {
+  repeated string model_names = 1;
+}
+
+message HealthCheckResponse {
+  bool ready = 1;
+  map<string, bool> model_status = 2;
+}

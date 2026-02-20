@@ -1,283 +1,181 @@
-# Fast Qwen3-ASR Inference Server (vLLM Backend, FastAPI async processing)
+# Fast Qwen3-ASR Inference Server
 
-A containerized Qwen3-ASR inferenceserver using FastAPI and vLLM.
-Provides HTTP `/transcribe` and WebSocket `/transcribe-streaming` endpoints.
+FastAPI + vLLM 기반 Qwen3-ASR 추론 서버입니다.
+HTTP `/transcribe`, WebSocket `/transcribe-streaming`, gRPC(`STTService`)를 제공합니다.
 
-## Setup
+## 프로젝트 구조
 
-1. **Build the image**:
+- `src/fast_qwen_asr/`: 애플리케이션 소스
+- `config/`: 런타임 설정(`default.json`, `runtime.json`, `offline.runtime.json`)
+- `docker/`: Dockerfile, compose 파일
+- `tests/`: 테스트 코드
+- `logs/`: 애플리케이션 로그(`app.log`, 로테이션)
 
-```bash
-make build
-```
+## 빠른 시작 (온라인 환경)
 
-2. **Start the server**:
+1. 이미지 빌드/기동
+
 ```bash
 make up
 ```
 
-Server will be available at `http://localhost:8907` by default.
-
-**!!FIRST START NOTICE!!** Downloading, CUDA graph compile, loading the model into VRAM and warmup can take a few minutes depending on your internet speed and GPU.
-
-3. **Check logs**:
-   ```bash
-   make logs
-   ```
-   Wait for "Application startup complete".
-
-## Configuration
-
-Environment variables can be set in `Makefile` or passed to `make up`:
-
-- `ENABLE_ASR_MODEL` (default: true)
-- `ENABLE_ALIGNER_MODEL` (default: true)
-- `ASR_MODEL_NAME` (default: Qwen/Qwen3-ASR-1.7B)
-- `ALIGNER_MODEL_NAME` (default: Qwen/Qwen3-ForcedAligner-0.6B)
-
-## Endpoints
-
-### `POST /transcribe`
-Upload an audio file for ASR.
-
-- **URL**: `http://localhost:8907/transcribe`
-- **Method**: POST (Multipart/Form-Data)
-- **Parameters**: 
-  - `file`: Audio file
-  - `language`: Target language (e.g. `de`)
-  - `forced_alignment`: true/false
-
-### `WS /transcribe-streaming`
-Stream raw PCM audio for real-time transcription.
-
-- **URL**: `ws://localhost:8907/transcribe-streaming`
-- **Protocol**: Send JSON `start`, then binary PCM chunks (16k, 16-bit, mono), then JSON `stop`.
-
-### `GET /health`
-
-- **URL**: `http://localhost:8907/health`
-- **Method**: GET
-
-## Testing
-
-### Health Check
-Get the stats and model loading status.
+2. 헬스체크
 
 ```bash
 make health
 ```
 
+3. 로그 확인
+
 ```bash
-Checking health...
-{
-  "status": "ready",
-  "limits": {
-    "max_concurrent_decode": 4,
-    "max_concurrent_infer": 1,
-    "threadpool_workers": 320
-  },
-  "memory": {
-    "ram_total_mb": 515491,
-    "ram_available_mb": 489283,
-    "ram_percent": 5.1,
-    "gpu_allocated_mb": 1756,
-    "gpu_reserved_mb": 1766
-  }
-}
+make logs
 ```
 
-**RESULTS: How much VRAM does Qwen3-ASR require?**:
-`Qwen/Qwen3-ASR-1.7B` and `Qwen/Qwen3-ForcedAligner-0.6B` together take < 2GB VRAM at PEAK - even with 80 concurrent streams in processing.
+기본 포트:
+- HTTP: `8907`
+- gRPC: `50051`
 
-### Automated Test
-Runs a verification script using cached sample files (downloads them once to `files/`).
+## 폐쇄망 배포 가이드
+
+폐쇄망에서는 `오프라인 이미지 + 외부 모델 볼륨` 방식으로 운영합니다.
+모델은 이미지에 내장하지 않으므로, 모델 교체 시 이미지 재빌드가 필요 없습니다.
+
+### 1) 온라인 환경에서 준비
+
+```bash
+# 베이스 이미지 확인/다운로드
+
+docker pull qwenllm/qwen3-asr:cu128
+
+# 오프라인 실행용 앱 이미지 빌드
+make build-offline
+
+# 배포용 tar 생성
+make save-offline
+```
+
+생성 파일:
+- `dist/qwen3-asr-offline.tar`
+
+### 2) 폐쇄망으로 반입
+
+아래를 폐쇄망 서버로 전달합니다.
+- `dist/qwen3-asr-offline.tar`
+- 모델 디렉토리 (예: `/data/asr-models/1.7b-v2-cp47728`)
+- 필요 시 설정 파일 (`config/offline.runtime.json`)
+
+### 3) 폐쇄망 서버에서 로드/실행
+
+```bash
+# 이미지 로드
+make load-offline
+
+# 실행 (기본 모델 경로/디렉토리명 사용)
+make up-offline
+```
+
+기본값:
+- `OFFLINE_MODELS_DIR=./models`
+- `OFFLINE_MODELS_MOUNT=/opt/models`
+- `OFFLINE_ASR_MODEL_DIR=1.7b-v2-cp47728`
+- `OFFLINE_ALIGNER_MODEL_DIR=0.6b-v3-cp22426`
+
+실행 시 내부적으로 아래가 적용됩니다.
+- `-v ./models:/opt/models:ro`
+- `APP_CFG__MODELS__ASR_MODEL_PATH=/opt/models/<ASR_MODEL_DIR>`
+- `APP_CFG__MODELS__ALIGNER_MODEL_PATH=/opt/models/<ALIGNER_MODEL_DIR>`
+- `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, `HF_DATASETS_OFFLINE=1`
+- Docker 로그 제한: `--log-opt max-size=10m --log-opt max-file=3`
+
+### 4) 폐쇄망 기동 확인
+
+```bash
+curl -s http://localhost:8907/health
+ls -al logs
+docker logs qwen3-asr-offline --tail 100
+```
+
+## 모델 교체 방법 (재빌드 없음)
+
+예: 새 모델 디렉토리가 `/data/asr-models/1.7b-v2-new` 인 경우
+
+```bash
+make down-offline
+make up-offline OFFLINE_ASR_MODEL_DIR=1.7b-v2-new
+```
+
+Aligner도 바꾸려면:
+
+```bash
+make up-offline \
+  OFFLINE_ASR_MODEL_DIR=1.7b-v2-new \
+  OFFLINE_ALIGNER_MODEL_DIR=0.6b-v3-new
+```
+
+모델 디렉토리만 교체하면 되며, 오프라인 이미지 재빌드는 필요 없습니다.
+
+## 주요 설정 파일
+
+- 온라인/compose: `config/runtime.json`
+- 오프라인/docker run: `config/offline.runtime.json`
+- 기본값: `config/default.json`
+
+주요 키:
+- `models.asr_model_path`
+- `models.aligner_model_path`
+- `models.local_files_only`
+- `models.force_offline`
+- `grpc.batch_wait_ms`
+- `grpc.infer_batching_mode` (`dynamic` / `inflight`)
+
+## 환경 변수 오버라이드
+
+접두사 방식:
+- `APP_CFG__SECTION__KEY=value`
+
+예시:
+
+```bash
+APP_CFG__SERVER__PORT=8000
+APP_CFG__MODELS__ENABLE_ALIGNER_MODEL=false
+APP_CFG__MODELS__ASR_MODEL_PATH=/opt/models/1.7b-v2-cp47728
+```
+
+## 엔드포인트
+
+- HTTP Transcribe: `POST /transcribe`
+- WebSocket Streaming: `WS /transcribe-streaming`
+- Health: `GET /health`
+- gRPC: `Infer`, `BatchInfer`, `HealthCheck`
+
+gRPC `InferRequest.audio`는 `float32 PCM bytes`(16kHz mono) 기준입니다.
+
+## 테스트/벤치 명령
 
 ```bash
 make test
-```
-
-```bash
-Running verification test...
-Testing files/reference.m4a
-Response: [{"text":"Das ist ein Referenztext.","language":"German"}]
-PASS: 'referenz' found.
-Testing files/reference.mp3
-Response: [{"text":"Das ist ein Referenztext.","language":"German"}]
-PASS: 'referenz' found.
-Testing files/reference.wav
-Response: [{"text":"Das ist ein Referenztext.","language":"German"}]
-PASS: 'referenz' found.
-Results: 3 PASSED, 0 FAILED
-```
-
-### Streaming Client Tests
-Scripts `client-streaming.py` and `client-streaming.js` are provided to test the streaming endpoint.
-The `make test-streaming` target will automatically convert a sample MP3 to PCM and run both clients.
-
-```bash
-# Install local dependencies (Python venv + Node modules) - only required for testing
-make setup-local
-
-# Run streaming tests (requires container to be UP)
 make test-streaming
-```
-
-```bash
-Running Python Streaming Test...
-Connecting to ws://127.0.0.1:8907/transcribe-streaming...
-Audio Duration: 2.06s
-Streaming files/reference.pcm...
-[19:00:53.518] [Server Ready]
-[19:00:53.520] [Partial] (): Finished sending audio.
-
-[19:00:53.598] [Final] (German): Das ist ein Referenztext.
-
-Processing Time: 0.09s
-Real-Time Factor (RTF): 0.0457
-
-Running Node.js Streaming Test...
-Connecting to ws://127.0.0.1:8907/transcribe-streaming...
-Audio Duration: 2.06s
-Connected.
-
-[19:00:53.661] [ready] {"type":"ready"}
-Finished sending audio.
-[19:00:53.664] [Partial] 
-[19:00:53.741] [Final] Das ist ein Referenztext.
-
-Processing Time: 0.09s
-Real-Time Factor (RTF): 0.0431
-
-Disconnected.
-```
-
-**RESULTS: How FAST is Qwen3-ASR?**:
-Qwen-ASR runs at roughly 20x real-time on a NVIDIA H200 NVL with Flash Attention 2.
-
-### Forced Aligner Tests
-
-```bash
-make test-aligner
-```
-
-```bash
-Running Forced Alignment Verification Test...
-[
-  {
-    "text": "Das ist ein Referenztext.",
-    "language": "German",
-    "timestamps": {
-      "items": [
-        {
-          "text": "Das",
-          "start_time": 0.16,
-          "end_time": 0.32
-        },
-        {
-          "text": "ist",
-          "start_time": 0.32,
-          "end_time": 0.48
-        },
-        {
-          "text": "ein",
-          "start_time": 0.48,
-          "end_time": 0.64
-        },
-        {
-          "text": "Referenztext",
-          "start_time": 0.64,
-          "end_time": 1.68
-        }
-      ]
-    }
-  }
-]
-```
-
-**Manual Usage**:
-
-*Note: The clients expect raw PCM audio (16k, 16-bit, mono). MP3/WAV files must be converted first.*
-
-**Convert Audio to PCM**:
-```bash
-ffmpeg -i files/reference.mp3 -f s16le -ac 1 -ar 16000 files/reference.pcm
-```
-
-**Python Client**:
-```bash
-source .venv/bin/activate
-python client-streaming.py -e ws://localhost:8907/transcribe-streaming -f files/reference.pcm
-```
-
-**Node.js Client**:
-```bash
-node client-streaming.js -e ws://localhost:8907/transcribe-streaming -f files/reference.pcm
-```
-
-## Benchmarking
-
-You can benchmark this server by running two commands:
-
-### Benchmark batching
-
-Defaults to 4 clients running 20 transcriptions in parallel.
-
-```bash
+make test-grpc
 make benchmark-batch
-```
-
-#### Results
-
-1x NVIDIA H200 NVL:
-
-```bash
-Running Batch Benchmark (Concurrency: 4, Requests: 20)...
-Starting Benchmark: 4 clients, 20 requests each.
-
---- Benchmark Results ---
-Total Requests:     80
-Successful:         80
-Errors:             0
-Total Wall Time:    2.81s
-Avg QPS:            28.51
-
--- Latency (sec) --
-Avg:  0.138
-P50:  0.139
-P95:  0.142
-```
-
-### Benchmark streaming
-
-Defaults to 4 clients running 20 transcriptions in parallel.
-
-```bash
 make benchmark-streaming
+make benchmark-grpc-batch
 ```
 
-#### Results
-
-1x NVIDIA H200 NVL:
+예시 (1000개 오디오 gRPC 배치 벤치):
 
 ```bash
-Running Streaming Benchmark (Concurrency: 4, Requests: 20)...
-Starting Benchmark: 4 clients, 20 requests each.
-
---- Benchmark Results ---
-Total Requests:     80
-Successful:         80
-Errors:             0
-Total Wall Time:    6.09s
-Avg QPS:            13.14
-
--- Latency (sec) --
-Avg:  0.229
-P50:  0.230
-P95:  0.240
-
--- RTF --
-Avg:  0.1109
-P50:  0.1122
-P95:  0.1179
+make benchmark-grpc-batch \
+  GRPC_BENCH_AUDIO_DIR=/data/8_Daejeon_sobang/Training/audio \
+  GRPC_BENCH_SAMPLES=1000 \
+  GRPC_BENCH_BATCH=16
 ```
 
+## 운영 참고
+
+- Docker 로그 제한은 `docker/docker-compose.yml`에서 `max-size=10m`, `max-file=3` 적용
+- 애플리케이션 파일 로그는 `logs/app.log`로 로테이션
+- 권한 문제 시:
+
+```bash
+make fix-logs-perms
+```

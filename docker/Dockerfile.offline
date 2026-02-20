@@ -1,0 +1,22 @@
+ARG BASE_IMAGE=qwenllm/qwen3-asr:cu128
+FROM ${BASE_IMAGE}
+
+WORKDIR /opt/fast-qwen-asr
+
+ENV PYTHONPATH=/opt/fast-qwen-asr/src
+ENV APP_CONFIG_PATH=/opt/fast-qwen-asr/config/offline.runtime.json
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
+ENV HF_DATASETS_OFFLINE=1
+
+COPY src ./src
+COPY config/default.json ./config/default.json
+COPY config/offline.runtime.json ./config/offline.runtime.json
+COPY stt_grpc_pb2.py ./stt_grpc_pb2.py
+COPY stt_grpc_pb2_grpc.py ./stt_grpc_pb2_grpc.py
+
+RUN mkdir -p logs
+
+EXPOSE 8000 50051
+
+CMD ["uvicorn", "fast_qwen_asr.api.http_server:app", "--host", "0.0.0.0", "--port", "8000"]

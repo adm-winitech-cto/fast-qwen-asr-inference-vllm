@@ -1,51 +1,92 @@
 IMAGE              ?= qwenllm/qwen3-asr:cu128
 CONTAINER          ?= qwen3-asr-fast
 PORT               ?= 8907
-HF_HOME            ?= /var/lib/docker/container_volumes/hf_models
-VLLM_CACHE_ROOT    ?= $(HF_HOME)/vllm_cache
+GRPC_PORT          ?= 50051
+COMPOSE_FILE       ?= docker/docker-compose.yml
+OFFLINE_IMAGE      ?= qwenllm/qwen3-asr:offline-test
+OFFLINE_CONTAINER  ?= qwen3-asr-offline
+OFFLINE_TAR        ?= dist/qwen3-asr-offline.tar
+OFFLINE_CONFIG     ?= /opt/fast-qwen-asr/config/offline.runtime.json
+OFFLINE_MODELS_DIR ?= $(PWD)/models
+OFFLINE_MODELS_MOUNT ?= /opt/models
+OFFLINE_ASR_MODEL_DIR ?= 1.7b-v2-cp47728
+OFFLINE_ALIGNER_MODEL_DIR ?= 0.6b-v3-cp22426
 FILES_DIR          ?= files
 TEST_URL_LIST      ?= https://raw.githubusercontent.com/kyr0/asr-sample-files/refs/heads/main/index.m3u
-GPU_MEM_UTIL       ?= 0.15
-ASR_MODEL_NAME     ?= Qwen/Qwen3-ASR-1.7B
-ALIGNER_MODEL_NAME ?= Qwen/Qwen3-ForcedAligner-0.6B
+CONFIG_FILE        ?= $(PWD)/config/runtime.json
+CONTAINER_CONFIG_FILE ?= /data/shared/Qwen3-ASR/config/runtime.json
+ENV_FILE           ?= config/docker.env
+GRPC_BENCH_AUDIO_DIR ?= /data/8_Daejeon_sobang/Training/audio
+GRPC_BENCH_SAMPLES ?= 1000
+GRPC_BENCH_BATCH ?= 16
+HOST_UID ?= $(shell id -u)
+HOST_GID ?= $(shell id -g)
 
-.PHONY: build up down logs health test setup-local test-streaming test-batch test-aligner benchmark-streaming benchmark-batch
+.PHONY: build up down logs health test setup-local test-streaming test-batch test-aligner test-grpc benchmark-streaming benchmark-batch benchmark-grpc-batch prepare-logs fix-logs-perms build-offline save-offline load-offline up-offline down-offline logs-offline
 
 build:
-	docker build --rm -t $(IMAGE) .
+	docker build --rm -t $(IMAGE) -f docker/Dockerfile .
 
-up:
-	@echo "Starting container with:"
-	@echo "  IMAGE:              $(IMAGE)"
-	@echo "  CONTAINER:          $(CONTAINER)"
-	@echo "  PORT:               $(PORT)"
-	@echo "  HF_HOME:            $(HF_HOME)"
-	@echo "  VLLM_CACHE_ROOT:    $(VLLM_CACHE_ROOT)"
-	@echo "  GPU_MEM_UTIL:       $(GPU_MEM_UTIL)"
-	@echo "  ASR_MODEL_NAME:     $(ASR_MODEL_NAME)"
-	@echo "  ALIGNER_MODEL_NAME: $(ALIGNER_MODEL_NAME)"
-	@read -p "Proceed? [y/N] " ans && [ $${ans:-N} = y ] || (echo "Aborted." && exit 1)
-	mkdir -p $(FILES_DIR)
-	docker run -d --name $(CONTAINER) \
+build-offline:
+	docker build --network none --rm -t $(OFFLINE_IMAGE) -f docker/Dockerfile.offline .
+
+save-offline:
+	@mkdir -p $(dir $(OFFLINE_TAR))
+	docker save $(OFFLINE_IMAGE) -o $(OFFLINE_TAR)
+	@echo "Saved: $(OFFLINE_TAR)"
+
+load-offline:
+	docker load -i $(OFFLINE_TAR)
+
+up-offline:
+	@$(MAKE) prepare-logs
+	@test -d "$(OFFLINE_MODELS_DIR)/$(OFFLINE_ASR_MODEL_DIR)" || (echo "Missing ASR model dir: $(OFFLINE_MODELS_DIR)/$(OFFLINE_ASR_MODEL_DIR)"; exit 1)
+	-docker rm -f $(OFFLINE_CONTAINER)
+	docker run -d --name $(OFFLINE_CONTAINER) \
 	  --gpus all --ipc=host \
 	  -p $(PORT):8000 \
-	  -e HF_HOME="/data/shared/hf_models" \
-	  -e VLLM_CACHE_ROOT="/data/shared/hf_models/vllm_cache" \
-	  -e ENABLE_ASR_MODEL=true \
-	  -e ENABLE_ALIGNER_MODEL=true \
-	  -e ASR_MODEL_NAME=$(ASR_MODEL_NAME) \
-	  -e ALIGNER_MODEL_NAME=$(ALIGNER_MODEL_NAME) \
-	  -e GPU_MEMORY_UTILIZATION=$(GPU_MEM_UTIL) \
-	  -v $(PWD):/data/shared/Qwen3-ASR \
-	  -v $(HF_HOME):/data/shared/hf_models \
-	  $(IMAGE)
+	  -p $(GRPC_PORT):50051 \
+	  -e APP_CONFIG_PATH=$(OFFLINE_CONFIG) \
+	  -e APP_CFG__MODELS__ASR_MODEL_PATH=$(OFFLINE_MODELS_MOUNT)/$(OFFLINE_ASR_MODEL_DIR) \
+	  -e APP_CFG__MODELS__ALIGNER_MODEL_PATH=$(OFFLINE_MODELS_MOUNT)/$(OFFLINE_ALIGNER_MODEL_DIR) \
+	  -e HF_HUB_OFFLINE=1 \
+	  -e TRANSFORMERS_OFFLINE=1 \
+	  -e HF_DATASETS_OFFLINE=1 \
+	  --log-driver json-file \
+	  --log-opt max-size=10m \
+	  --log-opt max-file=3 \
+	  -v $(PWD)/logs:/opt/fast-qwen-asr/logs \
+	  -v $(OFFLINE_MODELS_DIR):$(OFFLINE_MODELS_MOUNT):ro \
+	  $(OFFLINE_IMAGE)
+	@$(MAKE) logs-offline
+
+down-offline:
+	-docker rm -f $(OFFLINE_CONTAINER)
+
+logs-offline:
+	docker logs -f $(OFFLINE_CONTAINER)
+
+up:
+	@echo "Starting service with compose file: $(COMPOSE_FILE)"
+	@$(MAKE) prepare-logs
+	mkdir -p $(FILES_DIR)
+	docker compose -f $(COMPOSE_FILE) up -d --build
 	@$(MAKE) logs
 
 down:
-	-docker rm -f $(CONTAINER)
+	-docker compose -f $(COMPOSE_FILE) down
 
 logs:
-	docker logs -f $(CONTAINER)
+	docker compose -f $(COMPOSE_FILE) logs -f asr-server
+
+prepare-logs:
+	@mkdir -p logs
+	@chown -R $(HOST_UID):$(HOST_GID) logs 2>/dev/null || true
+	@chmod -R ug+rwX logs 2>/dev/null || true
+	@docker run --rm -v $(PWD)/logs:/logs alpine:3.20 sh -c "chown -R $(HOST_UID):$(HOST_GID) /logs && chmod -R 775 /logs" >/dev/null 2>&1 || true
+
+fix-logs-perms:
+	@$(MAKE) prepare-logs
 
 health:
 	@echo "Checking health..."
@@ -105,6 +146,12 @@ test-aligner:
 	@curl -s -X POST "http://127.0.0.1:$(PORT)/transcribe?language=de&forced_alignment=true" \
 		-F "files=@$(FILES_DIR)/reference.wav" | jq .
 
+test-grpc:
+	@echo "Running gRPC HealthCheck..."
+	@. .venv/bin/activate && python client-grpc.py --endpoint 127.0.0.1:$(GRPC_PORT) --health --health-model asr
+	@echo "Running gRPC Infer..."
+	@. .venv/bin/activate && python client-grpc.py --endpoint 127.0.0.1:$(GRPC_PORT) --file $(FILES_DIR)/reference.wav --lang ko --batch-size 2 --requests 2
+
 benchmark-streaming:
 	@echo "Running Streaming Benchmark (Concurrency: 4, Requests: 20)..."
 	@. .venv/bin/activate && python benchmark.py --mode streaming --url ws://127.0.0.1:$(PORT)/transcribe-streaming --file $(FILES_DIR)/reference.pcm --clients 4 --requests 20
@@ -113,3 +160,18 @@ benchmark-batch:
 	@echo "Running Batch Benchmark (Concurrency: 4, Requests: 20)..."
 	@. .venv/bin/activate && python benchmark.py --mode batch --url http://127.0.0.1:$(PORT)/transcribe --file $(FILES_DIR)/reference.wav --clients 4 --requests 20
 
+benchmark-grpc-batch:
+	@echo "Running gRPC BatchInfer Benchmark..."
+	@echo "  AUDIO_DIR: $(GRPC_BENCH_AUDIO_DIR)"
+	@echo "  SAMPLES:   $(GRPC_BENCH_SAMPLES)"
+	@echo "  BATCH:     $(GRPC_BENCH_BATCH)"
+	@docker run --rm --network host \
+		-v $(PWD):/work \
+		-v $(GRPC_BENCH_AUDIO_DIR):/bench_audio:ro \
+		$(IMAGE) \
+		python3 /work/grpc_batch_benchmark.py \
+			--endpoint 127.0.0.1:$(GRPC_PORT) \
+			--audio-dir /bench_audio \
+			--sample-size $(GRPC_BENCH_SAMPLES) \
+			--request-batch-size $(GRPC_BENCH_BATCH) \
+			--model-name 1.7b-v2-cp47728

@@ -1,0 +1,54 @@
+// stt_service.proto
+
+syntax = "proto3";
+
+package stt;
+
+service STTService {
+  // 단일 추론 요청
+  rpc Infer (InferRequest) returns (InferResponse);
+
+  // 배치 추론 요청
+  rpc BatchInfer (BatchInferRequest) returns (BatchInferResponse);
+
+  // 헬스체크
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message InferRequest {
+  bytes audio = 1;           // float32 PCM을 bytes로 전송 (audio_float32.tobytes())
+  string lang = 2;           // 언어 코드 ("ko")
+  string pretext = 3;        // 선행 텍스트 (현재 빈 문자열)
+  string model_name = 4;     // 모델 선택 ("1.7b-v2-cp47728" 또는 "Qwen/Qwen3-ASR-1.7B")
+}
+
+message InferResponse {
+  string text = 1;           // 전사 결과
+  bool success = 2;          // 성공 여부
+  string error = 3;          // 에러 메시지 (실패 시)
+}
+
+message BatchInferRequest {
+  repeated bytes audios = 1;   // float32 PCM bytes 배열
+  repeated string langs = 2;   // 길이가 1이면 전체 공통 언어, audios 길이와 같으면 개별 언어
+  string model_name = 3;       // 모델 선택 ("1.7b-v2-cp47728" 또는 "Qwen/Qwen3-ASR-1.7B")
+}
+
+message BatchInferItem {
+  string text = 1;             // 전사 결과
+  bool success = 2;            // 성공 여부
+  string error = 3;            // 에러 메시지
+}
+
+message BatchInferResponse {
+  repeated BatchInferItem items = 1;  // 요청 audio 순서와 동일한 결과 배열
+}
+
+message HealthCheckRequest {
+  repeated string model_names = 1;  // 확인할 모델 목록
+}
+
+message HealthCheckResponse {
+  bool ready = 1;
+  map<string, bool> model_status = 2;  // 모델별 상태
+}
