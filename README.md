@@ -87,12 +87,100 @@ make up-offline
 - `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, `HF_DATASETS_OFFLINE=1`
 - Docker 로그 제한: `--log-opt max-size=10m --log-opt max-file=3`
 
-### 4) 폐쇄망 기동 확인
+### 4) 폐쇄망 기동 확인 (운영 절차)
+
+1. 컨테이너 기동
 
 ```bash
-curl -s http://localhost:8907/health
+make up-offline
+```
+
+참고:
+- `make up-offline`는 마지막에 `docker logs -f qwen3-asr-offline`를 실행하므로 로그를 계속 팔로우합니다.
+- 기동 로그 확인 후 `Ctrl+C`로 빠져나와도 컨테이너는 계속 실행됩니다.
+
+2. 헬스체크 확인
+
+```bash
+curl -s http://localhost:8907/health | jq .
+```
+
+기대 결과:
+- 초기에는 `"status": "loading_models"`가 나올 수 있음 (정상)
+- 모델 로딩 완료 후 `"status": "ready"`여야 정상
+- 예시(정상):
+
+```json
+{
+  "status": "ready",
+  "limits": {
+    "max_concurrent_decode": 64,
+    "max_concurrent_infer": 1,
+    "batch_size": 64
+  },
+  "grpc": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 50051
+  }
+}
+```
+
+`ready` 대기용 예시:
+
+```bash
+until [ "$(curl -s http://localhost:8907/health | jq -r .status)" = "ready" ]; do
+  echo "waiting for model load..."
+  sleep 5
+done
+curl -s http://localhost:8907/health | jq .
+```
+
+3. 파일 로그 확인
+
+```bash
 ls -al logs
+```
+
+기대 결과:
+- `logs/app.log` 파일이 존재해야 함
+
+4. 컨테이너 로그 확인
+
+```bash
 docker logs qwen3-asr-offline --tail 100
+```
+
+기대 로그 키워드:
+- `Application startup complete.`
+- `gRPC server listening on 0.0.0.0:50051`
+- `Server is ready to accept requests`
+
+비정상 판단 기준:
+- `status`가 장시간 `loading_models`에서 바뀌지 않음
+- `docker logs`에 Python traceback 또는 `Model load failure`가 반복됨
+
+### 5) 트러블슈팅 (운영 중 자주 발생)
+
+포트 충돌:
+- 증상: `Bind for 0.0.0.0:8907 failed: port is already allocated`
+- 원인: 기존 서버(예: `qwen3-asr-fast`)가 같은 포트 사용 중
+- 조치:
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
+docker stop qwen3-asr-fast
+make up-offline
+```
+
+모델 경로 누락:
+- 증상: `Missing ASR model dir: ...`
+- 조치:
+
+```bash
+ls -al models
+ls -al models/1.7b-v2-cp47728
+make up-offline
 ```
 
 ## 모델 교체 방법 (재빌드 없음)
