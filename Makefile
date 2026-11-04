@@ -1,4 +1,4 @@
-IMAGE              ?= qwenllm/qwen3-asr:cu128
+IMAGE              ?= qwenllm/qwen3-asr:cu128-sbsa
 CONTAINER          ?= qwen3-asr-fast
 PORT               ?= 8907
 GRPC_PORT          ?= 50051
@@ -29,7 +29,7 @@ build:
 	docker build --rm -t $(IMAGE) -f docker/Dockerfile .
 
 build-offline:
-	docker build --network none --rm -t $(OFFLINE_IMAGE) -f docker/Dockerfile.offline .
+	docker build --network none --rm --build-arg BASE_IMAGE=$(IMAGE) -t $(OFFLINE_IMAGE) -f docker/Dockerfile.offline .
 
 save-offline:
 	@mkdir -p $(dir $(OFFLINE_TAR))

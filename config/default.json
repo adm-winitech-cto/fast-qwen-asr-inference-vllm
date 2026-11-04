@@ -1,0 +1,62 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "log_level": "info"
+  },
+  "logging": {
+    "level": "INFO",
+    "directory": "logs",
+    "file_name": "app.log",
+    "max_bytes": 10485760,
+    "backup_count": 3
+  },
+  "concurrency": {
+    "max_concurrent_decode": 4,
+    "max_concurrent_infer": 1,
+    "threadpool_workers": null,
+    "batch_size": 1
+  },
+  "streaming": {
+    "stream_min_samples": 1600,
+    "partial_interval_ms": 120,
+    "stream_expect_sr": 16000,
+    "unfixed_chunk_num": 2,
+    "unfixed_token_num": 5,
+    "chunk_size_sec": 2.0
+  },
+  "models": {
+    "enable_asr_model": true,
+    "enable_aligner_model": false,
+    "asr_model_name": "Qwen/Qwen3-ASR-1.7B",
+    "aligner_model_name": "Qwen/Qwen3-ForcedAligner-0.6B",
+    "asr_model_path": null,
+    "aligner_model_path": null,
+    "local_files_only": false,
+    "force_offline": false,
+    "gpu_memory_utilization": 0.3,
+    "max_new_tokens": 256,
+    "aligner_dtype": "bfloat16",
+    "aligner_device_map": "cuda:0",
+    "warmup_enabled": false,
+    "warmup_dummy_samples": 16000,
+    "warmup_language": "English",
+    "warmup_initial_chunks": [320, 640, 1024, 3200],
+    "warmup_repeat_chunk": 3200,
+    "warmup_repeat_count": 25
+  },
+  "cors": {
+    "allow_origins": ["*"],
+    "allow_credentials": true,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"]
+  },
+  "grpc": {
+    "enabled": false,
+    "host": "0.0.0.0",
+    "port": 50051,
+    "batch_wait_ms": 3,
+    "request_model_name": "asr",
+    "infer_batching_mode": "dynamic"
+  }
+}

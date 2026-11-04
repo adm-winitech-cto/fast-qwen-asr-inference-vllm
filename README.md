@@ -43,9 +43,9 @@ make logs
 ### 1) 온라인 환경에서 준비
 
 ```bash
-# 베이스 이미지 확인/다운로드
-
-docker pull qwenllm/qwen3-asr:cu128
+# 베이스 이미지 빌드 (DGX Spark / GB10 Blackwell, aarch64 · CUDA 12.8 툴킷, 13.0 드라이버)
+# 이 태그는 공개 레지스트리가 아니라 로컬에서 직접 빌드합니다.
+make build          # -> qwenllm/qwen3-asr:cu128-sbsa
 
 # 오프라인 실행용 앱 이미지 빌드
 make build-offline

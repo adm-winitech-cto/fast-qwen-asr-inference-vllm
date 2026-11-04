@@ -1,0 +1,77 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "log_level": "info"
+  },
+  "logging": {
+    "level": "INFO",
+    "directory": "logs",
+    "file_name": "app.log",
+    "max_bytes": 10485760,
+    "backup_count": 3
+  },
+  "concurrency": {
+    "max_concurrent_decode": 64,
+    "max_concurrent_infer": 1,
+    "threadpool_workers": null,
+    "batch_size": 1,
+    "_batch_size_note": "2026-10-27: 1. Was 64 until 2026-10-26 (5ch x 12 s p50 4.45 s vs 0.69 s at 1). 8 tried 2026-10-27 with partials on: 10 ch finals p50 2.98 s vs 1.92 s at 1"
+  },
+  "streaming": {
+    "stream_min_samples": 1600,
+    "partial_interval_ms": 120,
+    "stream_expect_sr": 16000,
+    "unfixed_chunk_num": 2,
+    "unfixed_token_num": 5,
+    "chunk_size_sec": 2.0
+  },
+  "models": {
+    "enable_asr_model": true,
+    "enable_aligner_model": false,
+    "asr_model_name": "Qwen/Qwen3-ASR-0.6B",
+    "aligner_model_name": "Qwen/Qwen3-ForcedAligner-0.6B",
+    "gpu_memory_utilization": 0.09,
+    "_gpu_memory_utilization_note": "was 0.15 until 2026-10-15, 0.12 until 2026-10-16. At 0.12 the KV pool was 78k tokens (8.3 GiB); 0.09 leaves ~44k tokens, ample for 10 streaming calls, and gives the host ~3.6 GiB more headroom",
+    "max_model_len": 16384,
+    "_max_model_len_note": "added 2026-10-16. The model default 65536 needs a 7 GiB KV floor for one request; engine start failed when TTS was warming up at the same moment. 16384 tokens is about 21 minutes of audio per request",
+    "max_new_tokens": 324,
+    "aligner_dtype": "bfloat16",
+    "aligner_device_map": "cuda:0",
+    "warmup_enabled": false,
+    "warmup_dummy_samples": 16000,
+    "warmup_language": "English",
+    "warmup_initial_chunks": [
+      320,
+      640,
+      1024,
+      3200
+    ],
+    "warmup_repeat_chunk": 3200,
+    "warmup_repeat_count": 25,
+    "asr_model_path": "/data/shared/Qwen3-ASR/models/0.6b-v3-cp22426",
+    "aligner_model_path": "/data/shared/Qwen3-ASR/models/0.6b-v3-cp22426",
+    "local_files_only": true,
+    "force_offline": true
+  },
+  "cors": {
+    "allow_origins": [
+      "*"
+    ],
+    "allow_credentials": true,
+    "allow_methods": [
+      "*"
+    ],
+    "allow_headers": [
+      "*"
+    ]
+  },
+  "grpc": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 50051,
+    "batch_wait_ms": 5,
+    "request_model_name": "asr",
+    "infer_batching_mode": "inflight" 
+  }
+}
